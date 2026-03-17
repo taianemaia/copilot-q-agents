@@ -67,24 +67,33 @@ Before looking at the diff, understand what you're reviewing:
 
 ## Step 3 — Get the full diff
 
-Run:
+Always diff file by file — never request the full diff in one call, as it will
+be truncated and you will miss changes.
+
+**Step 3a — Get the list of changed files:**
 ```
-git diff <base>...<feature>
+git diff --name-only <base>...<feature>
 ```
 
-If the diff is very large (> 500 lines), split it by file:
+**Step 3b — For each file, get its individual diff and cache it immediately:**
 ```
 git diff <base>...<feature> -- <file>
 ```
 
-Read the complete diff before forming any opinion. Do not skim.
+As soon as you receive the output, store the full diff text in memory under
+the file path as the key. You will use this cached content for all analysis
+in Step 4 — never re-run `git diff` for a file you have already fetched.
+Re-running the same diff wastes tokens and provides no new information.
+
+Process one file at a time: fetch → cache → analyse → record findings → next file.
+Do not skim — a missed line is a missed bug.
 
 ---
 
 ## Step 4 — Analyse the diff
 
-Review each changed file against every criterion below. Track all findings
-as you go — you will structure them in Step 5.
+For each file diffed in Step 3, apply every criterion below before moving to
+the next file. Track findings as you go — you will structure them in Step 5.
 
 ### Code cleanliness
 - No dead code (unreachable code, commented-out blocks, unused variables,
