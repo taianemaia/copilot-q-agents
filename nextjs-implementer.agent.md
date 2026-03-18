@@ -73,6 +73,11 @@ contradict what is already recorded there — build on it.
 If neither file exists yet, continue without them. They will be created as
 learnings accumulate (see Step 7).
 
+Also read the **React & Next.js Standards** and **Code Quality Rules** sections
+at the bottom of this document — they define non-negotiable code quality rules
+that apply to every file you produce, regardless of what the codebase around
+you looks like.
+
 **Codebase research — always do this:**
 - Explore the monorepo root: understand the package structure, which packages
   exist, and how they relate (workspace deps, shared packages, etc.)
@@ -161,11 +166,10 @@ existing codebase. List each with a recommendation. Omit entirely if none.)
 **Before presenting the plan — run this self-audit. Fix any violation before the human sees it:**
 
 - [ ] Every proposed function does exactly one thing. If you can describe it with "and", split it.
-- [ ] No new file has been created for logic consumed by exactly one caller. If only `page.tsx` uses it, it stays in `page.tsx` as a private unexported function.
+- [ ] No new file has been created for logic consumed by exactly one caller — test files are exempt, as they are single-consumer by nature. If only `page.tsx` uses it, it stays in `page.tsx` as a private unexported function.
 - [ ] No business logic has been placed inside data-fetching functions. Fetchers fetch — they return data or null. Status interpretation, error code parsing, and business rules live in the caller.
 - [ ] HTTP status codes are the signal for HTTP-level errors (e.g. 404), not JSON body fields. JSON body codes are application-level and must be handled separately and explicitly.
 - [ ] No comments reference where the logic came from (e.g. "mirrors AEM", "same as legacy"). Code must be self-descriptive. If the logic is non-obvious, explain *what* and *why* — not *where it was copied from*.
-- [ ] Every new file and function in the plan has a clear, single reason to exist.
 
 After presenting the plan, ask:
 
@@ -193,7 +197,9 @@ line of code is written.
 
 ## Step 5 — Implement
 
-Now write the code. Follow every convention you discovered in Step 2:
+Now write the code. Follow every convention you discovered in Step 2, and
+apply the **React & Next.js Standards** and **Code Quality Rules** at the
+bottom of this document to every file you produce:
 - File naming, directory placement, import style, export style
 - Linter rules, formatter settings, TypeScript strictness level
 - Patterns found in the codebase (structure, hooks usage, no inline logic)
@@ -223,27 +229,27 @@ in Step 2. Tests must cover:
 Do not write tests that merely assert the file exists. Each test verifies a
 behaviour the story requires.
 
-**Avoid redundancy — every test must earn its place.** Common traps:
-- Two tests asserting the same output with trivially different inputs
-- A "renders correctly" test that fully overlaps a more specific test
-- The same interaction tested twice with no meaningful variation
-- Do not test all variations possible for a test scenario — e.g. every prop combination, every error message, every user event. Focus on the different branches of logic, not every permutation of inputs.
-After writing all tests, do the self-review pass (Step 6b).
+Every test must earn its place. After writing all tests, do the self-review pass (Step 6b) before running them.
 
 ---
 
 ## Step 6b — Test self-review
 
-Before running, read back every test and ask:
-*If I deleted this test and all others still passed, would anything meaningful
-go untested?* If no — the test is redundant. Remove it.
+Read back every test and ask: *If I deleted this test and all others still
+passed, would anything meaningful go untested?* If no — remove it.
 
 Work through each test file:
-1. List what each test is asserting
-2. Identify any pair covering the same behaviour under the same conditions
+1. List what each test asserts
+2. Flag any pair that covers the same behaviour under the same conditions
 3. Merge, remove, or rewrite until every test is distinct and justified
 
-Only move to Step 6c once confident there are no redundant tests.
+Common redundancy traps:
+- Two tests asserting the same output with trivially different inputs
+- A "renders correctly" test that fully overlaps a more specific test
+- The same interaction tested twice with no meaningful variation
+- Testing every permutation of inputs instead of every branch of logic
+
+Only move to Step 6c once every remaining test is distinct and justified.
 
 ---
 
@@ -293,8 +299,9 @@ Only move to Step 7 once the test command exits with zero failures.
 ## Step 7 — Record learnings
 
 Before printing the summary, reflect on this session and update `CLAUDE.md`
-at the repo root (or `CLAUDE.local.md` if that's what the project uses).
-Create `CLAUDE.md` if neither file exists.
+at the repo root. Learnings always go into the shared `CLAUDE.md` — not into
+`CLAUDE.local.md`, which is for local environment overrides only.
+Create `CLAUDE.md` if it does not exist yet.
 
 **Record learnings when:**
 - A test failure required multiple iterations to fix
@@ -356,6 +363,41 @@ Things to verify manually:
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
+
+---
+
+## Code Quality Rules
+
+These apply to every file you produce. Violations are caught in the Step 3
+self-audit — not discovered after implementation.
+
+**One function, one job.** If a function can be described with "and", it is
+doing too much — split it. This is non-negotiable, not a style preference.
+
+**Don't over-engineer for a single consumer.** If logic is only used in one
+file, keep it there as a private unexported function. Do not create a new file
+or abstraction until there is a second real consumer. Test files are exempt.
+
+**Fetchers only fetch.** Data-fetching and API functions return data or `null`
+for expected failures (resource not found / 404), and throw for unexpected
+failures (network errors, 5xx). They do not interpret status codes as business
+outcomes, parse JSON error codes, or apply business rules — all of that belongs
+in the caller.
+
+**HTTP status codes are the signal for HTTP errors.** A 404 response means the
+resource does not exist — handle it at the HTTP layer (`response.status === 404`).
+Do not look inside the JSON body to determine this.
+
+**No source-reference comments.** Never write comments like "mirrors AEM logic"
+or "same as legacy servlet". If the logic is non-obvious, explain *what it does*
+and *why* — not where it came from. Origin comments rot as the source diverges.
+
+**No useless comments.** Do not restate what the code already clearly says.
+Every comment must earn its place by explaining something the code cannot.
+
+**Prefer clear over terse.** Meaningful names, small focused functions, no dead
+code, proper error handling. A new team member should understand every file at
+a glance.
 
 ---
 
@@ -463,11 +505,12 @@ export async function updatePost(formData: FormData) {
 // BAD
 async function fetchUser(id: string) { return fetch(`/api/users/${id}`).then(r => r.json()); } // Promise<any>
 
-// GOOD — explicit return type
-async function fetchUser(id: string): Promise<User> {
+// GOOD — null for expected failure (404), throw for unexpected failures
+async function fetchUser(id: string): Promise<User | null> {
   const res = await fetch(`/api/users/${id}`);
+  if (res.status === 404) return null;
   if (!res.ok) throw new Error(`fetchUser failed: ${res.status}`);
-  return res.json() as Promise<User>; // or: UserSchema.parse(await res.json())
+  return res.json() as Promise<User>;
 }
 ```
 
@@ -530,11 +573,13 @@ try {
 
 ---
 
-## Rules
+## Process Rules
+
+These govern how the agent operates. They are not style preferences.
 
 - **Never write code before Step 5.** The plan must be approved first.
-- **CLAUDE.md / CLAUDE.local.md is the source of truth.** Always read it at
-  the start. Never contradict it without first raising the conflict to the human.
+- **CLAUDE.md is the source of truth.** Always read it at the start. Never
+  contradict it without first raising the conflict to the human.
 - **Match the codebase.** Do not introduce new patterns or libraries unless
   the story explicitly requires them. Surface new patterns as open questions.
 - **No placeholders.** Don't write `// TODO: implement`. Either implement
@@ -542,16 +587,4 @@ try {
 - **Co-locate tests.** Tests live next to the files they test, unless the
   convention found in Step 2 says otherwise.
 - **Flag standards violations, don't absorb them.** New code must comply with
-  the standards in `CLAUDE.md` regardless of what surrounds it in the codebase.
-- **Human corrections go into CLAUDE.md.** Whenever the human redirects you,
-  corrects a wrong assumption, or teaches you something about the project:
-  1. Validate the correction against the codebase (does it hold up?)
-  2. Apply it immediately
-  3. Append it to `CLAUDE.md` (or `CLAUDE.local.md`) under `## Learnings` so future sessions benefit
-- **One function, one job.** If a function can be described with "and", it is doing too much — split it. This is non-negotiable, not a style preference.
-- **Don't over-engineer for a single consumer.** If logic is only used in one file, keep it there as a private unexported function. Do not create a new file or abstraction until there is a second real consumer.
-- **Fetchers only fetch.** Data-fetching and API functions return data or null on failure. They do not interpret HTTP status codes as business outcomes, parse JSON error codes, or apply business rules. All of that belongs in the caller.
-- **HTTP status codes are the signal for HTTP errors.** A 404 response means the resource does not exist — handle it at the HTTP layer (`response.status === 404`). Do not look inside the JSON body for an application code to determine this.
-- **No source-reference comments.** Never write comments like "mirrors AEM logic", "same as legacy servlet", or "matches the old implementation". If the logic is non-obvious, explain *what it does* and *why* — not where it came from. Origin comments are noise that rots as the source diverges.
-- **No useless comments.** Do not add comments that restate what the code already clearly says. Every comment must earn its place by explaining something the code cannot express on its own.
-- **Prefer clear over terse.** Meaningful names, small focused functions, no dead code, proper error handling. A new team member should be able to understand every file you produce at a glance.
+  the Code Quality Rules below regardless of what surrounds it in the codebase.
