@@ -359,6 +359,177 @@ Things to verify manually:
 
 ---
 
+## React & Next.js Standards
+
+These rules apply to every file you produce. Violations must be raised in the plan's self-audit checklist (Step 3), not discovered after implementation.
+
+### React
+
+**Never use `useEffect` for derived state or event responses.**
+Derived state is computed during render. Events are handled in their handler. `useEffect` is only for synchronizing with external systems (DOM APIs, WebSockets, timers, third-party libs).
+```tsx
+// BAD
+useEffect(() => { setFiltered(items.filter(i => i.name.includes(query))); }, [query]);
+
+// GOOD
+const filtered = items.filter(i => i.name.includes(query)); // computed in render
+```
+
+**Always clean up subscriptions, event listeners, and timers.**
+Every `useEffect` that attaches something must return a cleanup function.
+```tsx
+useEffect(() => {
+  window.addEventListener("resize", handleResize);
+  return () => window.removeEventListener("resize", handleResize);
+}, []);
+```
+
+**Never lie to the dependency array.** Every value used inside `useEffect` that can change between renders must be in the array. Never suppress `react-hooks/exhaustive-deps` with a comment.
+
+**`useMemo` and `useCallback` are not free — only use them when:**
+- A value is passed to a `React.memo`-wrapped child
+- A function is a `useEffect` dependency
+- A computation is provably expensive (confirmed by profiler)
+
+**Extract shared stateful logic into custom hooks.** If more than one component needs the same behavior, it belongs in a `use*` hook — not duplicated inline.
+
+---
+
+### Next.js App Router
+
+**Default to Server Components. Push `"use client"` to the leaves.**
+Only add `"use client"` when a component needs `useState`, `useEffect`, event handlers, or browser APIs. Never mark a layout or page as a client component unless there is no other option.
+```tsx
+// BAD — entire layout becomes client-rendered
+"use client";
+export default function Layout({ children }) { return <div>{children}</div>; }
+
+// GOOD — only the interactive island is a client component
+import ThemeToggle from "@/components/ThemeToggle"; // "use client" lives inside there
+export default function Layout({ children }) {
+  return <div><ThemeToggle />{children}</div>;
+}
+```
+
+**Async Server Components fetch data directly — no `useEffect`, no client state.**
+```tsx
+// GOOD
+async function ProductPage({ params }: { params: { id: string } }) {
+  const product = await fetchProduct(params.id);
+  return <ProductView product={product} />;
+}
+```
+
+**Fetch independent data in parallel.**
+```tsx
+// BAD — sequential: total time = A + B + C
+const user = await fetchUser(id);
+const posts = await fetchPosts(id);
+
+// GOOD — parallel: total time = max(A, B, C)
+const [user, posts] = await Promise.all([fetchUser(id), fetchPosts(id)]);
+```
+
+**Wrap slow data behind `<Suspense>` so fast content streams immediately.** Never block an entire page for one slow fetch.
+
+**`error.tsx` must be a Client Component (`"use client"`).** It does not catch errors thrown in the layout of the same segment — those are caught by the parent segment's `error.tsx`. Always include `global-error.tsx` at the root.
+
+**Server Actions are public HTTP endpoints. Always:**
+1. Verify authentication before touching any data
+2. Validate all input with Zod before using it
+3. Call `revalidatePath` or `revalidateTag` after mutations
+```tsx
+"use server";
+export async function updatePost(formData: FormData) {
+  const session = await getAuthSession();
+  if (!session) throw new Error("Unauthorized");
+  const input = PostSchema.parse(Object.fromEntries(formData));
+  await db.post.update({ where: { id: input.id }, data: input });
+  revalidateTag("posts");
+}
+```
+
+**Know which caching layer you are affecting:**
+- `{ cache: "no-store" }` — never cache (user-specific data)
+- `{ next: { revalidate: N } }` — time-based revalidation
+- `{ next: { tags: ["x"] } }` + `revalidateTag("x")` — on-demand revalidation
+
+---
+
+### TypeScript
+
+**Never use `any`.** Use `unknown` and narrow it, or define a proper type. `any` silently disables the type checker for that value and every value derived from it.
+```tsx
+// BAD
+async function fetchUser(id: string) { return fetch(`/api/users/${id}`).then(r => r.json()); } // Promise<any>
+
+// GOOD — explicit return type
+async function fetchUser(id: string): Promise<User> {
+  const res = await fetch(`/api/users/${id}`);
+  if (!res.ok) throw new Error(`fetchUser failed: ${res.status}`);
+  return res.json() as Promise<User>; // or: UserSchema.parse(await res.json())
+}
+```
+
+**Never use `React.FC`.** Type props directly on the function parameter.
+```tsx
+// BAD
+const Button: React.FC<{ label: string }> = ({ label }) => <button>{label}</button>;
+
+// GOOD
+function Button({ label }: { label: string }) { return <button>{label}</button>; }
+```
+
+**Use discriminated unions for mutually exclusive prop variants.**
+```tsx
+// BAD — ambiguous, no enforcement
+type Props = { label: string; href?: string; onClick?: () => void };
+
+// GOOD — invalid combinations are unrepresentable
+type Props =
+  | { variant: "button"; label: string; onClick: () => void }
+  | { variant: "link";   label: string; href: string };
+```
+
+**Validate all external data at the boundary.** Data from APIs, URL params, form submissions, `localStorage`, and environment variables must be parsed through a schema (Zod) at the point of entry. Do not trust external shapes.
+```tsx
+const UserSchema = z.object({ id: z.string(), name: z.string() });
+const user = UserSchema.parse(await res.json()); // throws with a clear message if malformed
+```
+
+---
+
+### General Engineering
+
+**Names express intent, not implementation.** Avoid `data`, `result`, `info`, `handler`, `util`, `helper`, `Manager`. Name things for what they are and what they do.
+```tsx
+// BAD
+const data = await fetch("/api/users");
+const handleClick = () => deactivateUser(id);
+
+// GOOD
+const activeUsers = await fetchActiveUsers();
+const handleUserDeactivation = () => deactivateUser(id);
+```
+
+**Handle errors explicitly at every boundary.** Never swallow errors silently. A `catch` block that does nothing is worse than no `catch` at all — it hides the failure.
+```tsx
+// BAD
+try { await api.update(data); } catch { }
+
+// GOOD
+try {
+  await api.update(data);
+} catch (err) {
+  logger.error("Failed to update", { err });
+  return { success: false, error: toError(err) };
+}
+```
+
+**Avoid prop drilling beyond two levels.** If a prop passes through three or more components without being used intermediately, use composition or a Context.
+
+---
+
 ## Rules
 
 - **Never write code before Step 5.** The plan must be approved first.
