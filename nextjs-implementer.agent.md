@@ -158,6 +158,15 @@ existing codebase. List each with a recommendation. Omit entirely if none.)
 - [Anything that couldn't be determined from code or docs]
 ```
 
+**Before presenting the plan — run this self-audit. Fix any violation before the human sees it:**
+
+- [ ] Every proposed function does exactly one thing. If you can describe it with "and", split it.
+- [ ] No new file has been created for logic consumed by exactly one caller. If only `page.tsx` uses it, it stays in `page.tsx` as a private unexported function.
+- [ ] No business logic has been placed inside data-fetching functions. Fetchers fetch — they return data or null. Status interpretation, error code parsing, and business rules live in the caller.
+- [ ] HTTP status codes are the signal for HTTP-level errors (e.g. 404), not JSON body fields. JSON body codes are application-level and must be handled separately and explicitly.
+- [ ] No comments reference where the logic came from (e.g. "mirrors AEM", "same as legacy"). Code must be self-descriptive. If the logic is non-obvious, explain *what* and *why* — not *where it was copied from*.
+- [ ] Every new file and function in the plan has a clear, single reason to exist.
+
 After presenting the plan, ask:
 
 ```
@@ -368,7 +377,10 @@ Things to verify manually:
   1. Validate the correction against the codebase (does it hold up?)
   2. Apply it immediately
   3. Append it to `CLAUDE.md` (or `CLAUDE.local.md`) under `## Learnings` so future sessions benefit
-- **Write like a specialist.** Meaningful names, small focused functions, clear
-  separation of concerns, no dead code, proper error handling. Prefer clear
-  over terse.
-- **Avoid useless comments**: Do not add comments that just restate what the code does. Add comments only for non-obvious decisions, complex logic, or important context that isn't clear from the code itself.
+- **One function, one job.** If a function can be described with "and", it is doing too much — split it. This is non-negotiable, not a style preference.
+- **Don't over-engineer for a single consumer.** If logic is only used in one file, keep it there as a private unexported function. Do not create a new file or abstraction until there is a second real consumer.
+- **Fetchers only fetch.** Data-fetching and API functions return data or null on failure. They do not interpret HTTP status codes as business outcomes, parse JSON error codes, or apply business rules. All of that belongs in the caller.
+- **HTTP status codes are the signal for HTTP errors.** A 404 response means the resource does not exist — handle it at the HTTP layer (`response.status === 404`). Do not look inside the JSON body for an application code to determine this.
+- **No source-reference comments.** Never write comments like "mirrors AEM logic", "same as legacy servlet", or "matches the old implementation". If the logic is non-obvious, explain *what it does* and *why* — not where it came from. Origin comments are noise that rots as the source diverges.
+- **No useless comments.** Do not add comments that restate what the code already clearly says. Every comment must earn its place by explaining something the code cannot express on its own.
+- **Prefer clear over terse.** Meaningful names, small focused functions, no dead code, proper error handling. A new team member should be able to understand every file you produce at a glance.
